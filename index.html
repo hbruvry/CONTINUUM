@@ -1,0 +1,310 @@
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Continuum</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body { margin: 0; }
+			canvas { display: block; }
+		</style>
+	</head>
+	<body>
+		<div id="container" style="display: block; width: 100%; height: 100vh;"></div>
+		<div id="gui-container" style="position: absolute; top: 0px; right: 0px;"></div>
+		
+		<script async type="module">
+			import * as THREE from 'https://unpkg.com/three@0.121.1/build/three.module.js';
+			import Stats from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/stats.module.js';
+			import { GUI } from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/dat.gui.module.js';
+			import { OrbitControls } from 'https://unpkg.com/three@0.121.1/examples/jsm/controls/OrbitControls.js';
+			import { GLTFLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/GLTFLoader.js';
+		
+			let container, clock, stats;
+			let camera, controls, scene, renderer;
+			let hemiLight, dirLight;
+			let modelMesh, modelSkeleton;
+			let modelAnimationsMixer, modelAnimationsCount;
+			let guiSettings;
+
+			let currentAnimation = 'idle';
+			const allAnimations = [];
+			const modelAnimations = {
+				idle: { weight: 1 },
+				walk: { weight: 0 },
+				run: { weight: 0 }
+			};
+			const additiveAnimations = {
+				sneak_pose: { weight: 0 },
+				sad_pose: { weight: 0 },
+				agree: { weight: 0 },
+				headShake: { weight: 0 }
+			};
+			const crossFadeControls = [];
+
+			init();
+			animate();
+
+			function setModelAnimationWeight( animation, weight )
+			{
+				animation.enabled = true;
+				animation.setEffectiveTimeScale( 1 );
+				animation.setEffectiveWeight( weight );
+				return ;
+			}
+
+			function activateModelAnimation( animation )
+			{
+				let	name;
+				let	settings;
+				
+				name = animation.getClip().name;
+				settings = modelAnimations[ name ] || additiveAnimations[name ];
+				setModelAnimationWeight( animation, settings.weight );
+				animation.play();
+				return ;
+			}
+
+			function setModelModelAnimations( animations )
+			{
+				let clip;
+				let name;
+				let animation;
+
+				for ( let i = 0; i !== modelAnimationsCount; ++i )
+				{
+					clip = animations[ i ];
+					name = clip.name;
+					if ( modelAnimations[ name ] )
+					{
+						animation = modelAnimationsMixer.clipAction( clip );
+						activateModelAnimation( animation );
+						modelAnimations[ name ].action = animation;
+						allAnimations.push( animation );
+					}
+					else if ( additiveAnimations[ name ] )
+					{
+						// Make the clip additive and remove the reference frame
+						THREE.AnimationUtils.makeClipAdditive( clip );
+						if ( clip.name.endsWith( '_pose' ) )
+							clip = THREE.AnimationUtils.subclip( clip, clip.name, 2, 3, 30 );
+						animation = modelAnimationsMixer.clipAction( clip );
+						activateModelAnimation( animation );
+						additiveAnimations[ name ].action = animation;
+						allAnimations.push( animation );
+					}
+				}
+				return ;
+			}
+
+			function loadModel( gltf )
+			{
+				let	animations;
+
+				modelMesh = gltf.scene;
+				scene.add( modelMesh );
+				modelMesh.traverse( function ( object )
+				{
+					if ( object.isMesh )
+						object.castShadow = true;
+				} );
+
+				modelSkeleton = new THREE.SkeletonHelper( modelMesh );
+				modelSkeleton.visible = true;
+				scene.add( modelSkeleton );
+
+				animations = gltf.animations;
+				modelAnimationsMixer = new THREE.AnimationMixer( modelMesh );
+				modelAnimationsCount = animations.length;
+				setModelModelAnimations( animations );
+				return ;
+			}
+
+			function executeAnimationCrossFade( startAnimation, endAnimation, duration )
+			{
+				if ( endAnimation )
+				{
+					setModelAnimationWeight( endAnimation, 1 );
+					endAnimation.time = 0;
+					// Crossfade with warping
+					if ( startAnimation )
+						startAnimation.crossFadeTo( endAnimation, duration, true );
+					else
+						endAnimation.fadeIn( duration );
+				}
+				else
+					startAnimation.fadeOut( duration );
+				return ;
+			}
+
+			function synchronizeAnimationCrossFade( startAnimation, endAnimation, duration )
+			{
+				modelAnimationsMixer.addEventListener( 'loop', onLoopFinished );
+				function onLoopFinished( event )
+				{
+					if ( event.action === startAnimation )
+					{
+						modelAnimationsMixer.removeEventListener( 'loop', onLoopFinished );
+						executeAnimationCrossFade( startAnimation, endAnimation, duration );
+					}
+				}
+				return ;
+			}
+
+			function prepareAnimationCrossFade( startAnimation, endAnimation, duration )
+			{
+				if ( currentAnimation === 'idle' || !startAnimation || !endAnimation )
+					executeAnimationCrossFade( startAnimation, endAnimation, duration );
+				else
+					synchronizeAnimationCrossFade( startAnimation, endAnimation, duration );
+				
+				// Update control colors
+				if ( endAnimation )
+					currentAnimation = endAnimation.getClip().name;
+				else
+					currentAnimation = 'None';
+				return ;
+			}
+
+			function setAnimationCrossFade( name, folder )
+			{
+				let settings;
+				let currentSettings;
+				let tmpAnimation;
+				let animation;
+
+				settings = modelAnimations[ name ];
+				guiSettings[ name ] = function ()
+				{
+					currentSettings = modelAnimations[ currentAnimation ];
+					tmpAnimation = currentSettings ? currentSettings.action : null;
+					animation = settings ? settings.action : null;
+					prepareAnimationCrossFade( tmpAnimation, animation, 0.35 );
+				};
+				crossFadeControls.push( folder.add( guiSettings, name ) );
+				return ;
+			}
+
+			function modifyTimeScale( speed )
+			{
+				modelAnimationsMixer.timeScale = speed;
+				return ;
+			}
+
+			function createGUI()
+			{
+				let gui;
+				let folderModelAnimations, folderAnimationSettings;
+				let mainAnimationNames;
+
+				gui = new GUI();
+				document.getElementById( 'gui-container' ).appendChild( gui.domElement );
+				guiSettings = { 'modify time scale': 1.0 };
+
+				// Set main animations folder
+				folderModelAnimations = gui.addFolder( 'Model Animations' );
+				mainAnimationNames = [ 'None', ...Object.keys( modelAnimations ) ]; 
+				for ( let i = 0, l = mainAnimationNames.length; i !== l; ++i )
+				{
+					setAnimationCrossFade( mainAnimationNames[ i ], folderModelAnimations );
+				}
+
+				folderAnimationSettings = gui.addFolder( 'Animation settings' );
+				folderAnimationSettings.add( guiSettings, 'modify time scale', 0.01, 2.0, 0.01 ).listen().onChange( modifyTimeScale );
+				return ;
+			}
+
+			function init()
+			{
+				let	floorMesh;
+
+				container = document.getElementById( 'container' );
+				clock = new THREE.Clock();
+
+				camera = new THREE.PerspectiveCamera( 30, container.clientWidth / container.clientHeight, 1, 5000 );
+				camera.position.set( 0, 0, 10 );
+				controls = new OrbitControls( camera, container );
+				controls.target.set( 0, 0.75, 0 );
+				controls.update();
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xf8f8ff );
+
+				hemiLight = new THREE.HemisphereLight( 0xffffff, 0x444444 );
+				hemiLight.position.set( 0, 20, 0 );
+				scene.add( hemiLight );
+
+				dirLight = new THREE.DirectionalLight( 0xffffff );
+				dirLight.position.set( 2, 10, 10 );
+				dirLight.castShadow = true;
+				dirLight.shadow.camera.top = 2;
+				dirLight.shadow.camera.bottom = -2;
+				dirLight.shadow.camera.left = -2;
+				dirLight.shadow.camera.right = 2;
+				dirLight.shadow.camera.near = 0.1;
+				dirLight.shadow.camera.far = 40;
+				scene.add( dirLight );
+
+				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 200, 200 ), new THREE.MeshPhongMaterial( { color: 0xffffff, depthWrite: false } ) );
+				floorMesh.rotation.x = -Math.PI / 2.0;
+				floorMesh.receiveShadow = true;
+				scene.add( floorMesh );
+
+				new GLTFLoader().load( 'models/gltf/Xbot.glb', function ( gltf ) {
+					loadModel( gltf );
+				} );
+				createGUI();
+
+				stats = new Stats();
+				container.appendChild( stats.dom );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( container.clientWidth, container.clientHeight );
+				renderer.toneMapping = THREE.ACESFilmicToneMapping;
+				renderer.toneMappingExposure = 1.0;
+				renderer.shadowMap.enabled = true;
+
+				container.appendChild( renderer.domElement );
+
+				window.addEventListener( 'resize', onWindowResize, false );
+				return ;
+			}
+
+			function onWindowResize()
+			{
+				camera.aspect = container.clientWidth / container.clientHeight;
+				camera.updateProjectionMatrix();	
+				renderer.setSize( container.clientWidth, container.clientHeight );
+				return ;
+			}
+
+			function render()
+			{
+				stats.update();
+				renderer.render( scene, camera );
+				return ;
+			}
+
+			function animate()
+			{
+				let animation;
+				let name;
+				let settings;
+
+				requestAnimationFrame( animate );
+				for ( let i = 0; i !== modelAnimationsCount; ++i )
+				{
+					animation = allAnimations[ i ];
+					name = animation.getClip().name;
+					settings = modelAnimations[ name ] || additiveAnimations[ name ];
+					settings.weight = animation.getEffectiveWeight();
+				}
+				modelAnimationsMixer.update( clock.getDelta() );
+				render();
+				return ;
+			}
+		</script>
+	</body>
+</html>
