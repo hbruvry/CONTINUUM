@@ -11,262 +11,171 @@
 		</style>
 	</head>
 	<body>
-		<div id="container" style="display: block; width: 100%; height: 100vh;"></div>
-		<div id="gui-container" style="position: absolute; top: 0px; right: 0px;"></div>
-		
-		<script async type="module">
+		<div id="container" style="display: block; width: 100%; height: 620px;"></div>
+		<div id="gui-container" style="position: absolute; top: 0px; left: 0px;"></div>
+
+		<script defer type="module">
 			import * as THREE from 'https://unpkg.com/three@0.121.1/build/three.module.js';
 			import Stats from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/stats.module.js';
 			import { GUI } from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/dat.gui.module.js';
 			import { OrbitControls } from 'https://unpkg.com/three@0.121.1/examples/jsm/controls/OrbitControls.js';
 			import { GLTFLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/GLTFLoader.js';
-		
+			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
+			
 			let container, clock, stats;
 			let camera, controls, scene, renderer;
 			let hemiLight, dirLight;
-			let modelMesh, modelBbox, modelBboxHelper, modelBsphere, modelBsphereHelper, modelSkeleton;
-			let modelAnimationsMixer, modelAnimationsCount;
+			let modelMesh, modelAnimMixer, modelSkeleton;
+			let modelBoundingBox, modelIcoHelper;
+			let modelGuizmoHelper, modelGridHelperX, modelGridHelperY, modelGridHelperZ;
+			let modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ;
 			let guiSettings;
 
-			let currentAnimation = 'idle';
-			const allAnimations = [];
-			const modelAnimations = {
-				idle: { weight: 1 },
-				walk: { weight: 0 },
-				run: { weight: 0 }
-			};
-			const additiveAnimations = {
-				sneak_pose: { weight: 0 },
-				sad_pose: { weight: 0 },
-				agree: { weight: 0 },
-				headShake: { weight: 0 }
-			};
-			const crossFadeControls = [];
+			const ui = {
+				timeScale: 1.0,
+			}
 
 			init();
 			animate();
 
-			function setModelAnimationWeight( animation, weight )
+			function loadModel( object )
 			{
-				animation.enabled = true;
-				animation.setEffectiveTimeScale( 1 );
-				animation.setEffectiveWeight( weight );
-				return ;
-			}
+				modelMesh = object;
 
-			function activateModelAnimation( animation )
-			{
-				let	name;
-				let	settings;
-				
-				name = animation.getClip().name;
-				settings = modelAnimations[ name ] || additiveAnimations[name ];
-				setModelAnimationWeight( animation, settings.weight );
-				animation.play();
-				return ;
-			}
+				modelAnimMixer = new THREE.AnimationMixer( modelMesh );
+				modelAnimMixer.clipAction( modelMesh.animations[ 0 ] ).play();
 
-			function setModelModelAnimations( animations )
-			{
-				let clip;
-				let name;
-				let animation;
-
-				for ( let i = 0; i !== modelAnimationsCount; ++i )
+				modelMesh.traverse( function ( child )
 				{
-					clip = animations[ i ];
-					name = clip.name;
-					if ( modelAnimations[ name ] )
+					if ( child.isMesh )
 					{
-						animation = modelAnimationsMixer.clipAction( clip );
-						activateModelAnimation( animation );
-						modelAnimations[ name ].action = animation;
-						allAnimations.push( animation );
+						child.castShadow = true;
+						child.receiveShadow = true;
 					}
-					else if ( additiveAnimations[ name ] )
-					{
-						// Make the clip additive and remove the reference frame
-						THREE.AnimationUtils.makeClipAdditive( clip );
-						if ( clip.name.endsWith( '_pose' ) )
-							clip = THREE.AnimationUtils.subclip( clip, clip.name, 2, 3, 30 );
-						animation = modelAnimationsMixer.clipAction( clip );
-						activateModelAnimation( animation );
-						additiveAnimations[ name ].action = animation;
-						allAnimations.push( animation );
-					}
-				}
-				return ;
-			}
-
-			function loadModel( gltf )
-			{
-				let	animations;
-
-				modelMesh = gltf.scene;
-				scene.add( modelMesh );
-
-				modelMesh.traverse( function ( object )
-				{
-					if ( object.isMesh )
-						object.castShadow = true;
 				} );
-
-				modelBbox = new THREE.Box3();
-				modelBboxHelper = new THREE.Box3Helper(modelBbox, new THREE.Color(0, 255, 0));
-				scene.add( modelBboxHelper );
-
-				modelBsphere = new THREE.Sphere();
-				const geometry = new THREE.SphereGeometry( modelBsphere.radius, 16, 16 );
-				const wireframe = new THREE.WireframeGeometry( geometry );
-				modelBsphereHelper = new THREE.LineSegments( wireframe );
-				modelBsphereHelper.material.depthTest = false;
-				modelBsphereHelper.material.opacity = 0.25;
-				modelBsphereHelper.material.transparent = true;
-				scene.add( modelBsphereHelper );
+				scene.add( modelMesh );
 
 				modelSkeleton = new THREE.SkeletonHelper( modelMesh );
 				modelSkeleton.visible = true;
 				scene.add( modelSkeleton );
+			}
 
-				animations = gltf.animations;
-				modelAnimationsMixer = new THREE.AnimationMixer( modelMesh );
-				modelAnimationsCount = animations.length;
-				setModelModelAnimations( animations );
+			function setArrowHelpers()
+			{
+				modelArrowHelperX = new THREE.ArrowHelper( new THREE.Vector3( 1.0, 0.0, 0.0 ), new THREE.Vector3(), 20, 0xff0000 );
+				modelArrowHelperY = new THREE.ArrowHelper( new THREE.Vector3( 0.0, 1.0, 0.0 ), new THREE.Vector3(), 20, 0xff0000 );
+				modelArrowHelperZ = new THREE.ArrowHelper( new THREE.Vector3( 0.0, 0.0, 1.0 ), new THREE.Vector3(), 20, 0xff0000 );
+				scene.add( modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ );
 				return ;
 			}
 
-			function executeAnimationCrossFade( startAnimation, endAnimation, duration )
+			function setGuizmoHelper()
 			{
-				if ( endAnimation )
-				{
-					setModelAnimationWeight( endAnimation, 1 );
-					endAnimation.time = 0;
-					// Crossfade with warping
-					if ( startAnimation )
-						startAnimation.crossFadeTo( endAnimation, duration, true );
-					else
-						endAnimation.fadeIn( duration );
-				}
-				else
-					startAnimation.fadeOut( duration );
-				return ;
+				let gridHelperX;
+				let gridHelperY;
+				let gridHelperZ; 
+
+				modelGuizmoHelper = new THREE.Group();
+				gridHelperX = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
+				gridHelperX.scale.set( 1.0, 1.0, 0.618034 );
+				modelGuizmoHelper.add( gridHelperX );
+
+				gridHelperY = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
+				gridHelperY.rotation.x = Math.PI / 2.0;
+				gridHelperY.scale.set( 0.618034, 1.0, 1.0 );
+				modelGuizmoHelper.add( gridHelperY );
+
+				gridHelperZ = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
+				gridHelperZ.rotation.z = Math.PI / 2.0;
+				gridHelperZ.scale.set( 0.618034, 1.0, 1.0 );
+				modelGuizmoHelper.add( gridHelperZ );
+				scene.add( modelGuizmoHelper );
 			}
 
-			function synchronizeAnimationCrossFade( startAnimation, endAnimation, duration )
+			function setModelHelpers()
 			{
-				modelAnimationsMixer.addEventListener( 'loop', onLoopFinished );
-				function onLoopFinished( event )
-				{
-					if ( event.action === startAnimation )
-					{
-						modelAnimationsMixer.removeEventListener( 'loop', onLoopFinished );
-						executeAnimationCrossFade( startAnimation, endAnimation, duration );
-					}
-				}
-				return ;
-			}
+				let modelBoundingBoxHelper;
+				let geometry;
+				let wireframe;
 
-			function prepareAnimationCrossFade( startAnimation, endAnimation, duration )
-			{
-				if ( currentAnimation === 'idle' || !startAnimation || !endAnimation )
-					executeAnimationCrossFade( startAnimation, endAnimation, duration );
-				else
-					synchronizeAnimationCrossFade( startAnimation, endAnimation, duration );
-				
-				// Update control colors
-				if ( endAnimation )
-					currentAnimation = endAnimation.getClip().name;
-				else
-					currentAnimation = 'None';
-				return ;
-			}
+				setGuizmoHelper();
 
-			function setAnimationCrossFade( name, folder )
-			{
-				let settings;
-				let currentSettings;
-				let tmpAnimation;
-				let animation;
+				modelBoundingBox = new THREE.Box3();
+				modelBoundingBoxHelper = new THREE.Box3Helper( modelBoundingBox, new THREE.Color( 0, 255, 0 ) );
 
-				settings = modelAnimations[ name ];
-				guiSettings[ name ] = function ()
-				{
-					currentSettings = modelAnimations[ currentAnimation ];
-					tmpAnimation = currentSettings ? currentSettings.action : null;
-					animation = settings ? settings.action : null;
-					prepareAnimationCrossFade( tmpAnimation, animation, 0.35 );
-				};
-				crossFadeControls.push( folder.add( guiSettings, name ) );
+				geometry = new THREE.IcosahedronGeometry( 0.5, 0 );
+				wireframe = new THREE.WireframeGeometry( geometry );	
+				modelIcoHelper = new THREE.LineSegments( wireframe );
+				modelIcoHelper.material.depthTest = false;
+				modelIcoHelper.material.opacity = 0.75;
+				modelIcoHelper.material.transparent = true;
+				scene.add( modelIcoHelper );
+
+				setArrowHelpers();
 				return ;
 			}
 
 			function modifyTimeScale( speed )
 			{
-				modelAnimationsMixer.timeScale = speed;
+				modelAnimMixer.timeScale = speed;
 				return ;
 			}
 
 			function createGUI()
 			{
 				let gui;
-				let folderModelAnimations, folderAnimationSettings;
-				let mainAnimationNames;
+				let folderAnimation;
 
 				gui = new GUI();
 				document.getElementById( 'gui-container' ).appendChild( gui.domElement );
-				guiSettings = { 'modify time scale': 1.0 };
-
-				// Set main animations folder
-				folderModelAnimations = gui.addFolder( 'Model Animations' );
-				mainAnimationNames = [ 'None', ...Object.keys( modelAnimations ) ]; 
-				for ( let i = 0, l = mainAnimationNames.length; i !== l; ++i )
-				{
-					setAnimationCrossFade( mainAnimationNames[ i ], folderModelAnimations );
-				}
-
-				folderAnimationSettings = gui.addFolder( 'Animation settings' );
-				folderAnimationSettings.add( guiSettings, 'modify time scale', 0.01, 2.0, 0.01 ).listen().onChange( modifyTimeScale );
+				folderAnimation = gui.addFolder( 'Animation settings' );
+				folderAnimation.add( ui, 'timeScale', 0.01, 2.0, 0.01 ).listen().onChange( modifyTimeScale );
 				return ;
 			}
 
 			function init()
 			{
+				let modelLoader;
 				let	floorMesh;
 
 				container = document.getElementById( 'container' );
 				clock = new THREE.Clock();
 
 				camera = new THREE.PerspectiveCamera( 30, container.clientWidth / container.clientHeight, 1, 5000 );
-				camera.position.set( 0, 0, 10 );
+				camera.position.set( 0, 240, 1200 );
 				controls = new OrbitControls( camera, container );
-				controls.target.set( 0, 0.75, 0 );
+				controls.target.set( 0, 80, 0 );
 				controls.update();
 
 				scene = new THREE.Scene();
 				scene.background = new THREE.Color( 0xf8f8ff );
+				scene.fog = new THREE.Fog( 0xf8f8ff, 1200, 2000 );
 
-				hemiLight = new THREE.HemisphereLight( 0xffffff, 0x444444 );
-				hemiLight.position.set( 0, 20, 0 );
+				hemiLight = new THREE.HemisphereLight( 0xf8f8ff, 0x404048 );
+				hemiLight.position.set( 0, 240, 0 );
 				scene.add( hemiLight );
 
-				dirLight = new THREE.DirectionalLight( 0xffffff );
-				dirLight.position.set( 2, 10, 10 );
+				dirLight = new THREE.DirectionalLight( 0xf8f8ff );
+				dirLight.position.set( 0, 240, 120 );
 				dirLight.castShadow = true;
-				dirLight.shadow.camera.top = 2;
-				dirLight.shadow.camera.bottom = -2;
-				dirLight.shadow.camera.left = -2;
-				dirLight.shadow.camera.right = 2;
-				dirLight.shadow.camera.near = 0.1;
-				dirLight.shadow.camera.far = 40;
+				dirLight.shadow.camera.top = 160;
+				dirLight.shadow.camera.bottom = - 80;
+				dirLight.shadow.camera.left = - 120;
+				dirLight.shadow.camera.right = 120;
 				scene.add( dirLight );
 
-				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 200, 200 ), new THREE.MeshPhongMaterial( { color: 0xffffff, depthWrite: false } ) );
+				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff, depthWrite: false } ) );
 				floorMesh.rotation.x = -Math.PI / 2.0;
 				floorMesh.receiveShadow = true;
 				scene.add( floorMesh );
 
-				new GLTFLoader().load( 'models/gltf/Xbot.glb', function ( gltf ) {
-					loadModel( gltf );
+				const grid = new THREE.GridHelper( 2000, 20, 0xf0f0f0, 0xf0f0f0 );
+				scene.add( grid );
+
+				const loader = new FBXLoader();
+				loader.load( 'models/fbx/Samba Dancing.fbx', function ( object ) {
+					loadModel( object );
+					setModelHelpers();
 				} );
 
 				createGUI();
@@ -299,18 +208,13 @@
 			{
 				let min;
 				let max;
-				let position;
-				let positions = [];
-				let bone;
-				
-				min = new THREE.Vector3( 1000, 1000, 1000 );
-				max = new THREE.Vector3( -1000, -1000, -1000 );
-				for ( let i = 0; i < modelSkeleton.bones.length; i++ )
+
+				min = new THREE.Vector3( Infinity, Infinity, Infinity );
+				max = min.clone().multiplyScalar( -1 );
+				for (let i = 0, position; i < modelSkeleton.bones.length; i++ )
 				{
 					position = new THREE.Vector3();
-					bone = modelSkeleton.bones[ i ];
-					bone.getWorldPosition( position );
-					positions.push( position );
+					modelSkeleton.bones[ i ].getWorldPosition( position );
 					if ( position.x < min.x ) min.x = position.x;
 					if ( position.y < min.y ) min.y = position.y;
 					if ( position.z < min.z ) min.z = position.z;
@@ -318,11 +222,100 @@
 					if ( position.y > max.y ) max.y = position.y;
 					if ( position.z > max.z ) max.z = position.z;
 				}
-				modelBbox.set( min, max );
-				modelBbox.getCenter(position);
-				modelBsphere.setFromPoints( positions );
-				modelBsphereHelper.scale.set( modelBsphere.radius, modelBsphere.radius, modelBsphere.radius );
-				modelBsphereHelper.position.set( modelBsphere.center.x, modelBsphere.center.y, modelBsphere.center.z );
+				modelBoundingBox.set( min, max );
+				return ;
+			}
+
+			function getIcosahedronEdge( center, angle )
+			{
+				let	differenceMin;
+				let differenceMax;
+				let edge;
+
+				differenceMin = modelBoundingBox.min.clone().sub( center );
+				differenceMax = modelBoundingBox.max.clone().sub( center );
+				edge = Math.max(
+					Math.abs( differenceMin.x * Math.cos( angle ) ),
+					Math.abs( differenceMin.y ),
+					Math.abs( differenceMin.z * Math.sin( angle ) ),
+					Math.abs( differenceMax.x * Math.cos( angle ) ),
+					Math.abs( differenceMax.y * Math.sin( angle ) ),
+					Math.abs( differenceMax.z ) ) * 2.0;
+				return ( edge );
+			}
+
+			function updateModelHelpers()
+			{
+				let bone;
+				let edge;
+				let	center;
+				let hipLeft;
+				let hipRight;
+				let direction;
+				let angle;
+
+				bone = modelSkeleton.bones[ 0 ];
+				center = new THREE.Vector3();
+				bone.getWorldPosition( center );
+
+				updateModelBbox();
+				bone = modelSkeleton.bones[ 101 ];
+				hipLeft = new THREE.Vector3();
+				bone.getWorldPosition( hipLeft );
+				bone = modelSkeleton.bones[ 111 ];
+				hipRight = new THREE.Vector3();
+				bone.getWorldPosition( hipRight );
+				direction = hipLeft.clone().sub( hipRight ).normalize();
+				angle = Math.PI * 0.5 + Math.atan2( direction.x, direction.z );
+				edge = getIcosahedronEdge( center, angle );
+
+				modelGuizmoHelper.position.set( center.x, center.y, center.z );
+				modelGuizmoHelper.scale.set( edge, edge, edge );
+				modelGuizmoHelper.rotation.set( 0, angle, 0 );
+
+				edge = Math.sqrt( Math.pow( edge, 2.0 ) + Math.pow( edge * 0.618034, 2.0 ) );
+				modelIcoHelper.scale.set( edge, edge, edge);
+				modelIcoHelper.position.set( center.x, center.y, center.z );
+				modelIcoHelper.rotation.set( 0, angle, 0 );
+
+				updateArrowHelpers( center, angle );
+				return ;
+			}
+
+			function updateArrowHelpers( center, angle )
+			{
+				let euler;
+				let positionSum;
+				let sumX, sumY, sumZ;
+
+				euler = new THREE.Euler( 0, angle + Math.PI, 0, 'XYZ' );
+				positionSum = new THREE.Vector3( );
+				for ( let l = 0, position; l < modelSkeleton.bones.length; l++ )
+				{
+					position = new THREE.Vector3();
+					modelSkeleton.bones[ l ].getWorldPosition( position );
+					positionSum.add( position );
+				}
+				positionSum.divideScalar( modelSkeleton.bones.length );
+				positionSum.sub( center );
+
+				sumX = positionSum.clone();
+				sumX.projectOnVector( new THREE.Vector3( 0.0, 1.0, 0.0 ) );
+				modelArrowHelperX.setLength( sumX.length() * 3.0, 0.0, 4.0 );
+				modelArrowHelperX.setDirection( sumX.normalize() );
+				modelArrowHelperX.position.set( center.x, center.y, center.z );
+
+				sumY = positionSum.clone();
+				sumY.projectOnVector( new THREE.Vector3( 0.0, 0.0, 1.0 ).applyEuler( euler ) );
+				modelArrowHelperY.setLength( sumY.length() * 3.0, 0.0, 4.0 );
+				modelArrowHelperY.setDirection( sumY.normalize() );
+				modelArrowHelperY.position.set( center.x, center.y, center.z );
+
+				sumZ = positionSum.clone();
+				sumZ.projectOnVector( new THREE.Vector3( 1.0, 0.0, 0.0 ).applyEuler( euler ) );
+				modelArrowHelperZ.setLength( sumZ.length() * 3.0, 0.0, 4.0 );
+				modelArrowHelperZ.setDirection( sumZ.normalize() );
+				modelArrowHelperZ.position.set( center.x, center.y, center.z );
 				return ;
 			}
 
@@ -340,15 +333,9 @@
 				let settings;
 
 				requestAnimationFrame( animate );
-				for ( let i = 0; i !== modelAnimationsCount; ++i )
-				{
-					animation = allAnimations[ i ];
-					name = animation.getClip().name;
-					settings = modelAnimations[ name ] || additiveAnimations[ name ];
-					settings.weight = animation.getEffectiveWeight();
-				}
-				modelAnimationsMixer.update( clock.getDelta() );
-				updateModelBbox();
+				if ( modelAnimMixer )
+					modelAnimMixer.update( clock.getDelta() );
+				updateModelHelpers();
 				render();
 				return ;
 			}
