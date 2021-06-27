@@ -22,8 +22,9 @@
 			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
 			import { ConvexGeometry } from 'https://unpkg.com/three@0.121.1/examples/jsm/geometries/ConvexGeometry.js';
 			import { BufferGeometryUtils } from 'https://unpkg.com/three@0.121.1/examples/jsm/utils/BufferGeometryUtils.js';
+			import { EXRLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/EXRLoader.js';
 			
-			let container, clock, stats;
+			let container, clock/*, stats*/;
 			let camera, controls, scene, renderer;
 			let hemiLight, dirLight;
 
@@ -32,6 +33,8 @@
 			let modelSkelHelper, modelIcoHelper, modelGuizmoHelper;
 			let modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ;
 			let guiSettings;
+			let path = 'models/fbx/' 
+			// let path = 'https://www.hbruvry.com/wp-content/uploads/2021/06/';
 
 			const ui = { timeScale: 1.0 }
 
@@ -56,6 +59,15 @@
 				scene.add( modelSkelHelper );
 			}
 
+			function getBonePosition( index )
+			{
+				let position;
+
+				position = new THREE.Vector3();
+				modelSkelHelper.bones[ index ].getWorldPosition( position );
+				return ( position );
+			}
+
 			function setModelConvexMesh()
 			{
 				let vertices = [];
@@ -66,7 +78,7 @@
 				geometry = new ConvexGeometry( vertices );
 
 				material = new THREE.MeshNormalMaterial();
-				material.opacity = 0.5;
+				material.opacity = 0.25;
 				material.transparent = true;
 
 				modelConvexMesh = new THREE.Mesh( geometry, material );
@@ -168,22 +180,22 @@
 				dirLight.shadow.camera = new THREE.OrthographicCamera( 160, -80, -120, 120 );
 				scene.add( hemiLight, dirLight );
 
-				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff, depthWrite: false } ) );
+				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff/*, depthWrite: false*/ } ) );
 				floorMesh.rotation.x = -Math.PI / 2.0;
 				floorMesh.receiveShadow = true;
 				floorHelper = new THREE.GridHelper( 2000, 20, 0xf0f0f0, 0xf0f0f0 );
 				scene.add( floorMesh, floorHelper );
 
 				modelLoader = new FBXLoader();
-				modelLoader.load( 'models/fbx/Samba Dancing.fbx', function ( object ) {
+				modelLoader.load( path + 'Samba-Dancing.fbx', function ( object ) {
 					loadModel( object );
 					setModelConvexMesh();
 					setModelHelpers();
 				} );
 
 				createGUI();
-				stats = new Stats();
-				container.appendChild( stats.dom );
+				// stats = new Stats();
+				// container.appendChild( stats.dom );
 
 				renderer = new THREE.WebGLRenderer( { antialias: true } );
 				renderer.setPixelRatio( window.devicePixelRatio );
@@ -240,15 +252,6 @@
 					Math.abs( differenceMax.y * Math.sin( angle ) ),
 					Math.abs( differenceMax.z ) ) * 2.0;
 				return ( edge );
-			}
-
-			function getBonePosition( index )
-			{
-				let position;
-
-				position = new THREE.Vector3();
-				modelSkelHelper.bones[ index ].getWorldPosition( position );
-				return ( position );
 			}
 
 			function updateModelHelpers()
@@ -314,10 +317,9 @@
 
 			function updateModelConvexMesh()
 			{
-				// let childGeometry;
-				// let positions;
-				let vertices = [];
 				let geometry;
+				let positions;
+				let vertices = [];
 
 				/*
 				modelMesh.traverse( function ( child )
@@ -339,17 +341,21 @@
 				} );
 				*/
 
-				for (let i = 0; i < modelSkelHelper.bones.length; i++ )
-					vertices.push( getBonePosition( i ) );
-				geometry = new ConvexGeometry( vertices );
-				modelConvexMesh.geometry = geometry;
+				geometry = new THREE.IcosahedronGeometry( 16.0, 2 );
+				for (let i = 0, position; i < modelSkelHelper.bones.length; i++ )
+				{
+					position = getBonePosition( i );
+					for (let j = 0; j < geometry.vertices.length; j++ )
+						vertices.push( position.clone().add( geometry.vertices[ j ] ) );
+				}
+				modelConvexMesh.geometry = new ConvexGeometry( vertices );
 				modelConvexMesh.geometry.needsUpdate = true;
 				return ;
 			}
 
 			function render()
 			{
-				stats.update();
+//				stats.update();
 				renderer.render( scene, camera );
 				return ;
 			}
