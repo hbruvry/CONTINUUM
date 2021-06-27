@@ -11,7 +11,7 @@
 		</style>
 	</head>
 	<body>
-		<div id="container" style="display: block; width: 100%; height: 620px;"></div>
+		<div id="container" style="display: block; width: 100%; height: 100vh;"></div>
 		<div id="gui-container" style="position: absolute; top: 0px; left: 0px;"></div>
 
 		<script defer type="module">
@@ -19,21 +19,21 @@
 			import Stats from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/stats.module.js';
 			import { GUI } from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/dat.gui.module.js';
 			import { OrbitControls } from 'https://unpkg.com/three@0.121.1/examples/jsm/controls/OrbitControls.js';
-			import { GLTFLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/GLTFLoader.js';
 			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
+			import { ConvexGeometry } from 'https://unpkg.com/three@0.121.1/examples/jsm/geometries/ConvexGeometry.js';
+			import { BufferGeometryUtils } from 'https://unpkg.com/three@0.121.1/examples/jsm/utils/BufferGeometryUtils.js';
 			
 			let container, clock, stats;
 			let camera, controls, scene, renderer;
 			let hemiLight, dirLight;
-			let modelMesh, modelAnimMixer, modelSkeleton;
-			let modelBoundingBox, modelIcoHelper;
-			let modelGuizmoHelper, modelGridHelperX, modelGridHelperY, modelGridHelperZ;
+
+			let modelConvexMesh;
+			let modelMesh, modelAnimMixer, modelBoundingBox;
+			let modelSkelHelper, modelIcoHelper, modelGuizmoHelper;
 			let modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ;
 			let guiSettings;
 
-			const ui = {
-				timeScale: 1.0,
-			}
+			const ui = { timeScale: 1.0 }
 
 			init();
 			animate();
@@ -41,23 +41,37 @@
 			function loadModel( object )
 			{
 				modelMesh = object;
-
 				modelAnimMixer = new THREE.AnimationMixer( modelMesh );
 				modelAnimMixer.clipAction( modelMesh.animations[ 0 ] ).play();
 
 				modelMesh.traverse( function ( child )
 				{
 					if ( child.isMesh )
-					{
 						child.castShadow = true;
-						child.receiveShadow = true;
-					}
 				} );
 				scene.add( modelMesh );
 
-				modelSkeleton = new THREE.SkeletonHelper( modelMesh );
-				modelSkeleton.visible = true;
-				scene.add( modelSkeleton );
+				modelBoundingBox = new THREE.Box3();				
+				modelSkelHelper = new THREE.SkeletonHelper( modelMesh );
+				scene.add( modelSkelHelper );
+			}
+
+			function setModelConvexMesh()
+			{
+				let vertices = [];
+				let geometry, material;
+
+				for ( let i = 0; i < modelSkelHelper.bones.length; i++ )
+					vertices.push( getBonePosition( i ) );
+				geometry = new ConvexGeometry( vertices );
+
+				material = new THREE.MeshNormalMaterial();
+				material.opacity = 0.5;
+				material.transparent = true;
+
+				modelConvexMesh = new THREE.Mesh( geometry, material );
+				scene.add( modelConvexMesh );
+				return ;
 			}
 
 			function setArrowHelpers()
@@ -71,46 +85,41 @@
 
 			function setGuizmoHelper()
 			{
-				let gridHelperX;
-				let gridHelperY;
-				let gridHelperZ; 
+				let gridHelperX, gridHelperY, gridHelperZ; 
 
 				modelGuizmoHelper = new THREE.Group();
+
 				gridHelperX = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
-				gridHelperX.scale.set( 1.0, 1.0, 0.618034 );
-				modelGuizmoHelper.add( gridHelperX );
-
 				gridHelperY = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
-				gridHelperY.rotation.x = Math.PI / 2.0;
-				gridHelperY.scale.set( 0.618034, 1.0, 1.0 );
-				modelGuizmoHelper.add( gridHelperY );
-
 				gridHelperZ = new THREE.GridHelper( 1, 2, 0xff0000, 0xe0e0e0 );
+
+				gridHelperY.rotation.x = Math.PI / 2.0;
 				gridHelperZ.rotation.z = Math.PI / 2.0;
+
+				gridHelperX.scale.set( 1.0, 1.0, 0.618034 );
+				gridHelperY.scale.set( 0.618034, 1.0, 1.0 );
 				gridHelperZ.scale.set( 0.618034, 1.0, 1.0 );
+
+				modelGuizmoHelper.add( gridHelperX );
+				modelGuizmoHelper.add( gridHelperY );
 				modelGuizmoHelper.add( gridHelperZ );
 				scene.add( modelGuizmoHelper );
 			}
 
-			function setModelHelpers()
+			function setIcoHelper()
 			{
-				let modelBoundingBoxHelper;
-				let geometry;
-				let wireframe;
-
-				setGuizmoHelper();
-
-				modelBoundingBox = new THREE.Box3();
-				modelBoundingBoxHelper = new THREE.Box3Helper( modelBoundingBox, new THREE.Color( 0, 255, 0 ) );
+				let geometry, wireframe;
 
 				geometry = new THREE.IcosahedronGeometry( 0.5, 0 );
 				wireframe = new THREE.WireframeGeometry( geometry );	
 				modelIcoHelper = new THREE.LineSegments( wireframe );
-				modelIcoHelper.material.depthTest = false;
-				modelIcoHelper.material.opacity = 0.75;
-				modelIcoHelper.material.transparent = true;
 				scene.add( modelIcoHelper );
+			}
 
+			function setModelHelpers()
+			{
+				setGuizmoHelper();
+				setIcoHelper();
 				setArrowHelpers();
 				return ;
 			}
@@ -136,7 +145,7 @@
 			function init()
 			{
 				let modelLoader;
-				let	floorMesh;
+				let floorMesh, floorHelper;
 
 				container = document.getElementById( 'container' );
 				clock = new THREE.Clock();
@@ -153,33 +162,26 @@
 
 				hemiLight = new THREE.HemisphereLight( 0xf8f8ff, 0x404048 );
 				hemiLight.position.set( 0, 240, 0 );
-				scene.add( hemiLight );
-
 				dirLight = new THREE.DirectionalLight( 0xf8f8ff );
 				dirLight.position.set( 0, 240, 120 );
 				dirLight.castShadow = true;
-				dirLight.shadow.camera.top = 160;
-				dirLight.shadow.camera.bottom = - 80;
-				dirLight.shadow.camera.left = - 120;
-				dirLight.shadow.camera.right = 120;
-				scene.add( dirLight );
+				dirLight.shadow.camera = new THREE.OrthographicCamera( 160, -80, -120, 120 );
+				scene.add( hemiLight, dirLight );
 
 				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff, depthWrite: false } ) );
 				floorMesh.rotation.x = -Math.PI / 2.0;
 				floorMesh.receiveShadow = true;
-				scene.add( floorMesh );
+				floorHelper = new THREE.GridHelper( 2000, 20, 0xf0f0f0, 0xf0f0f0 );
+				scene.add( floorMesh, floorHelper );
 
-				const grid = new THREE.GridHelper( 2000, 20, 0xf0f0f0, 0xf0f0f0 );
-				scene.add( grid );
-
-				const loader = new FBXLoader();
-				loader.load( 'models/fbx/Samba Dancing.fbx', function ( object ) {
+				modelLoader = new FBXLoader();
+				modelLoader.load( 'models/fbx/Samba Dancing.fbx', function ( object ) {
 					loadModel( object );
+					setModelConvexMesh();
 					setModelHelpers();
 				} );
 
 				createGUI();
-
 				stats = new Stats();
 				container.appendChild( stats.dom );
 
@@ -189,7 +191,6 @@
 				renderer.toneMapping = THREE.ACESFilmicToneMapping;
 				renderer.toneMappingExposure = 1.0;
 				renderer.shadowMap.enabled = true;
-
 				container.appendChild( renderer.domElement );
 
 				window.addEventListener( 'resize', onWindowResize, false );
@@ -206,15 +207,13 @@
 
 			function updateModelBbox()
 			{
-				let min;
-				let max;
+				let min, max;
 
 				min = new THREE.Vector3( Infinity, Infinity, Infinity );
 				max = min.clone().multiplyScalar( -1 );
-				for (let i = 0, position; i < modelSkeleton.bones.length; i++ )
+				for (let i = 0, position; i < modelSkelHelper.bones.length; i++ )
 				{
-					position = new THREE.Vector3();
-					modelSkeleton.bones[ i ].getWorldPosition( position );
+					position = getBonePosition( i );
 					if ( position.x < min.x ) min.x = position.x;
 					if ( position.y < min.y ) min.y = position.y;
 					if ( position.z < min.z ) min.z = position.z;
@@ -228,8 +227,7 @@
 
 			function getIcosahedronEdge( center, angle )
 			{
-				let	differenceMin;
-				let differenceMax;
+				let	differenceMin, differenceMax;
 				let edge;
 
 				differenceMin = modelBoundingBox.min.clone().sub( center );
@@ -244,31 +242,32 @@
 				return ( edge );
 			}
 
+			function getBonePosition( index )
+			{
+				let position;
+
+				position = new THREE.Vector3();
+				modelSkelHelper.bones[ index ].getWorldPosition( position );
+				return ( position );
+			}
+
 			function updateModelHelpers()
 			{
-				let bone;
 				let edge;
-				let	center;
-				let hipLeft;
-				let hipRight;
-				let direction;
+				let	direction, center;
+				let hipLeft, hipRight;
 				let angle;
 
-				bone = modelSkeleton.bones[ 0 ];
-				center = new THREE.Vector3();
-				bone.getWorldPosition( center );
-
 				updateModelBbox();
-				bone = modelSkeleton.bones[ 101 ];
-				hipLeft = new THREE.Vector3();
-				bone.getWorldPosition( hipLeft );
-				bone = modelSkeleton.bones[ 111 ];
-				hipRight = new THREE.Vector3();
-				bone.getWorldPosition( hipRight );
+				hipLeft = getBonePosition( 101 );
+				hipRight = getBonePosition( 111 );
 				direction = hipLeft.clone().sub( hipRight ).normalize();
 				angle = Math.PI * 0.5 + Math.atan2( direction.x, direction.z );
-				edge = getIcosahedronEdge( center, angle );
 
+				center = getBonePosition( 0 );
+				updateArrowHelpers( center, angle );
+				
+				edge = getIcosahedronEdge( center, angle );
 				modelGuizmoHelper.position.set( center.x, center.y, center.z );
 				modelGuizmoHelper.scale.set( edge, edge, edge );
 				modelGuizmoHelper.rotation.set( 0, angle, 0 );
@@ -277,8 +276,6 @@
 				modelIcoHelper.scale.set( edge, edge, edge);
 				modelIcoHelper.position.set( center.x, center.y, center.z );
 				modelIcoHelper.rotation.set( 0, angle, 0 );
-
-				updateArrowHelpers( center, angle );
 				return ;
 			}
 
@@ -290,32 +287,63 @@
 
 				euler = new THREE.Euler( 0, angle + Math.PI, 0, 'XYZ' );
 				positionSum = new THREE.Vector3( );
-				for ( let l = 0, position; l < modelSkeleton.bones.length; l++ )
-				{
-					position = new THREE.Vector3();
-					modelSkeleton.bones[ l ].getWorldPosition( position );
-					positionSum.add( position );
-				}
-				positionSum.divideScalar( modelSkeleton.bones.length );
+				for ( let i = 0; i < modelSkelHelper.bones.length; i++ )
+					positionSum.add( getBonePosition( i ) );
+				positionSum.divideScalar( modelSkelHelper.bones.length );
 				positionSum.sub( center );
 
 				sumX = positionSum.clone();
-				sumX.projectOnVector( new THREE.Vector3( 0.0, 1.0, 0.0 ) );
+				sumX.projectOnVector( new THREE.Vector3( 1.0, 0.0, 0.0 ).applyEuler( euler ) );
 				modelArrowHelperX.setLength( sumX.length() * 3.0, 0.0, 4.0 );
 				modelArrowHelperX.setDirection( sumX.normalize() );
 				modelArrowHelperX.position.set( center.x, center.y, center.z );
 
 				sumY = positionSum.clone();
-				sumY.projectOnVector( new THREE.Vector3( 0.0, 0.0, 1.0 ).applyEuler( euler ) );
+				sumY.projectOnVector( new THREE.Vector3( 0.0, 1.0, 0.0 ) );
 				modelArrowHelperY.setLength( sumY.length() * 3.0, 0.0, 4.0 );
 				modelArrowHelperY.setDirection( sumY.normalize() );
 				modelArrowHelperY.position.set( center.x, center.y, center.z );
 
 				sumZ = positionSum.clone();
-				sumZ.projectOnVector( new THREE.Vector3( 1.0, 0.0, 0.0 ).applyEuler( euler ) );
+				sumZ.projectOnVector( new THREE.Vector3( 0.0, 0.0, 1.0 ).applyEuler( euler ) );
 				modelArrowHelperZ.setLength( sumZ.length() * 3.0, 0.0, 4.0 );
 				modelArrowHelperZ.setDirection( sumZ.normalize() );
 				modelArrowHelperZ.position.set( center.x, center.y, center.z );
+				return ;
+			}
+
+			function updateModelConvexMesh()
+			{
+				// let childGeometry;
+				// let positions;
+				let vertices = [];
+				let geometry;
+
+				/*
+				modelMesh.traverse( function ( child )
+				{
+					if ( child.isMesh )
+					{
+						childGeometry = child.geometry.clone();
+						childGeometry.deleteAttribute( 'normal' );
+						childGeometry.deleteAttribute( 'uv' );
+						positions = childGeometry.getAttribute( 'position' );
+						for ( let i = 0, position; i < positions.count; i++ )
+						{
+							position = new THREE.Vector3();
+							position.fromBufferAttribute( positions, i );
+							child.boneTransform( i, position );
+							vertices.push( position );
+						}
+					}
+				} );
+				*/
+
+				for (let i = 0; i < modelSkelHelper.bones.length; i++ )
+					vertices.push( getBonePosition( i ) );
+				geometry = new ConvexGeometry( vertices );
+				modelConvexMesh.geometry = geometry;
+				modelConvexMesh.geometry.needsUpdate = true;
 				return ;
 			}
 
@@ -335,6 +363,7 @@
 				requestAnimationFrame( animate );
 				if ( modelAnimMixer )
 					modelAnimMixer.update( clock.getDelta() );
+				updateModelConvexMesh();
 				updateModelHelpers();
 				render();
 				return ;
