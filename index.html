@@ -20,21 +20,31 @@
 			import { GUI } from 'https://unpkg.com/three@0.121.1/examples/jsm/libs/dat.gui.module.js';
 			import { OrbitControls } from 'https://unpkg.com/three@0.121.1/examples/jsm/controls/OrbitControls.js';
 			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
-			import { ConvexGeometry } from 'https://unpkg.com/three@0.121.1/examples/jsm/geometries/ConvexGeometry.js';
+//			import { ConvexGeometry } from 'https://unpkg.com/three@0.121.1/examples/jsm/geometries/ConvexGeometry.js';
 			import { BufferGeometryUtils } from 'https://unpkg.com/three@0.121.1/examples/jsm/utils/BufferGeometryUtils.js';
 			import { EXRLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/EXRLoader.js';
 			
-			let container, clock/*, stats*/;
+			let container, clock, stats;
 			let camera, controls, scene, renderer;
 			let hemiLight, dirLight;
 
 			let modelConvexMesh;
 			let modelMesh, modelAnimMixer, modelBoundingBox;
-			let modelSkelHelper, modelIcoHelper, modelGuizmoHelper;
-			let modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ;
+			let modelCenter, modelAngle, modelDirection;
+			let modelPentaTris = [];
+			let modelSkelHelper, modelIcoHelper, modelGuizmoHelper, modelPentaHelper, modelDirHelper;
+
+			let indexHead = 12;
+			let indexHandLeft = 43;
+			let indexHandRight = 86;
+			let indexHipLeft = 101;
+			let indexHipRight = 111;
+			let indexFootLeft = 109;
+			let indexFootRight = 118;
+
 			let guiSettings;
 			let path = 'models/fbx/' 
-			// let path = 'https://www.hbruvry.com/wp-content/uploads/2021/06/';
+//			let path = 'https://www.hbruvry.com/wp-content/uploads/2021/07/';
 
 			const ui = { timeScale: 1.0 }
 
@@ -54,9 +64,8 @@
 				} );
 				scene.add( modelMesh );
 
-				modelBoundingBox = new THREE.Box3();				
-				modelSkelHelper = new THREE.SkeletonHelper( modelMesh );
-				scene.add( modelSkelHelper );
+				modelBoundingBox = new THREE.Box3();
+				modelDirection = new THREE.Vector3();			
 			}
 
 			function getBonePosition( index )
@@ -78,20 +87,11 @@
 				geometry = new ConvexGeometry( vertices );
 
 				material = new THREE.MeshNormalMaterial();
-				material.opacity = 0.25;
+				material.opacity = 0.125;
 				material.transparent = true;
 
 				modelConvexMesh = new THREE.Mesh( geometry, material );
 				scene.add( modelConvexMesh );
-				return ;
-			}
-
-			function setArrowHelpers()
-			{
-				modelArrowHelperX = new THREE.ArrowHelper( new THREE.Vector3( 1.0, 0.0, 0.0 ), new THREE.Vector3(), 20, 0xff0000 );
-				modelArrowHelperY = new THREE.ArrowHelper( new THREE.Vector3( 0.0, 1.0, 0.0 ), new THREE.Vector3(), 20, 0xff0000 );
-				modelArrowHelperZ = new THREE.ArrowHelper( new THREE.Vector3( 0.0, 0.0, 1.0 ), new THREE.Vector3(), 20, 0xff0000 );
-				scene.add( modelArrowHelperX, modelArrowHelperY, modelArrowHelperZ );
 				return ;
 			}
 
@@ -107,32 +107,48 @@
 
 				gridHelperY.rotation.x = Math.PI / 2.0;
 				gridHelperZ.rotation.z = Math.PI / 2.0;
-
 				gridHelperX.scale.set( 1.0, 1.0, 0.618034 );
 				gridHelperY.scale.set( 0.618034, 1.0, 1.0 );
 				gridHelperZ.scale.set( 0.618034, 1.0, 1.0 );
 
-				modelGuizmoHelper.add( gridHelperX );
-				modelGuizmoHelper.add( gridHelperY );
-				modelGuizmoHelper.add( gridHelperZ );
+				modelGuizmoHelper.add( gridHelperX, gridHelperY, gridHelperZ );
 				scene.add( modelGuizmoHelper );
 			}
 
 			function setIcoHelper()
 			{
-				let geometry, wireframe;
+				let geometry, material;
 
 				geometry = new THREE.IcosahedronGeometry( 0.5, 0 );
-				wireframe = new THREE.WireframeGeometry( geometry );	
-				modelIcoHelper = new THREE.LineSegments( wireframe );
+				geometry = new THREE.WireframeGeometry( geometry );
+				material = new THREE.LineBasicMaterial( { color: 0xe0e0e0 } );
+
+				modelIcoHelper = new THREE.LineSegments( geometry, material );
 				scene.add( modelIcoHelper );
+			}
+
+			function setPentaHelper()
+			{
+				let geometry, material;
+
+				geometry = new THREE.Geometry();
+				geometry = new THREE.WireframeGeometry( geometry );
+				material = new THREE.LineBasicMaterial( { color: 0x00ff00 } );
+
+				modelPentaHelper = new THREE.LineSegments( geometry, material );
+				modelPentaHelper.material.depthTest = false;
+				scene.add( modelPentaHelper );
+
+				modelDirHelper = new THREE.ArrowHelper( new THREE.Vector3( 1.0, 0.0, 0.0 ), new THREE.Vector3(), 1, 0x0000ff );
+				scene.add( modelDirHelper );
+				return ;
 			}
 
 			function setModelHelpers()
 			{
 				setGuizmoHelper();
 				setIcoHelper();
-				setArrowHelpers();
+				setPentaHelper();
 				return ;
 			}
 
@@ -174,28 +190,31 @@
 
 				hemiLight = new THREE.HemisphereLight( 0xf8f8ff, 0x404048 );
 				hemiLight.position.set( 0, 240, 0 );
+				
 				dirLight = new THREE.DirectionalLight( 0xf8f8ff );
 				dirLight.position.set( 0, 240, 120 );
 				dirLight.castShadow = true;
 				dirLight.shadow.camera = new THREE.OrthographicCamera( 160, -80, -120, 120 );
 				scene.add( hemiLight, dirLight );
 
-				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff/*, depthWrite: false*/ } ) );
+				floorMesh = new THREE.Mesh( new THREE.PlaneGeometry( 2400, 2400 ), new THREE.MeshPhongMaterial( { color: 0xffffff } ) );
 				floorMesh.rotation.x = -Math.PI / 2.0;
 				floorMesh.receiveShadow = true;
 				floorHelper = new THREE.GridHelper( 2000, 20, 0xf0f0f0, 0xf0f0f0 );
 				scene.add( floorMesh, floorHelper );
 
 				modelLoader = new FBXLoader();
-				modelLoader.load( path + 'Samba-Dancing.fbx', function ( object ) {
+				modelLoader.load( path + 'Swing-Dancing.fbx', function ( object ) {
 					loadModel( object );
-					setModelConvexMesh();
+					modelSkelHelper = new THREE.SkeletonHelper( modelMesh );
+//					scene.add( modelSkelHelper );
+//					setModelConvexMesh();
 					setModelHelpers();
 				} );
 
 				createGUI();
-				// stats = new Stats();
-				// container.appendChild( stats.dom );
+//				stats = new Stats();
+//				container.appendChild( stats.dom );
 
 				renderer = new THREE.WebGLRenderer( { antialias: true } );
 				renderer.setPixelRatio( window.devicePixelRatio );
@@ -237,81 +256,142 @@
 				return ;
 			}
 
-			function getIcosahedronEdge( center, angle )
+			function getIcosahedronEdge()
 			{
 				let	differenceMin, differenceMax;
 				let edge;
 
-				differenceMin = modelBoundingBox.min.clone().sub( center );
-				differenceMax = modelBoundingBox.max.clone().sub( center );
+				differenceMin = modelBoundingBox.min.clone().sub( modelCenter );
+				differenceMax = modelBoundingBox.max.clone().sub( modelCenter );
 				edge = Math.max(
-					Math.abs( differenceMin.x * Math.cos( angle ) ),
+					Math.abs( differenceMin.x * Math.cos( modelAngle ) ),
 					Math.abs( differenceMin.y ),
-					Math.abs( differenceMin.z * Math.sin( angle ) ),
-					Math.abs( differenceMax.x * Math.cos( angle ) ),
-					Math.abs( differenceMax.y * Math.sin( angle ) ),
+					Math.abs( differenceMin.z * Math.sin( modelAngle ) ),
+					Math.abs( differenceMax.x * Math.cos( modelAngle ) ),
+					Math.abs( differenceMax.y * Math.sin( modelAngle ) ),
 					Math.abs( differenceMax.z ) ) * 2.0;
 				return ( edge );
+			}
+
+			function updateModelDirection()
+			{
+				let triangles = [];
+				let pentagonCenter;
+				let pentagonNormal;
+				let distance;
+
+				triangles.push( new THREE.Triangle(
+					getBonePosition( indexFootLeft ),
+					getBonePosition( indexHead ),
+					getBonePosition( indexHandRight ) ) );
+				triangles.push( new THREE.Triangle(
+					getBonePosition( indexHandLeft ),
+					getBonePosition( indexHandRight ),
+					getBonePosition( indexFootRight ) ) );
+				triangles.push( new THREE.Triangle(
+					getBonePosition( indexHead ),
+					getBonePosition( indexFootRight ),
+					getBonePosition( indexFootLeft ) ) );
+				triangles.push( new THREE.Triangle(
+					getBonePosition( indexHandRight ),
+					getBonePosition( indexFootLeft ),
+					getBonePosition( indexHandLeft ) ) );
+				triangles.push( new THREE.Triangle(
+					getBonePosition( indexFootRight ),
+					getBonePosition( indexHandLeft ),
+					getBonePosition( indexHead ) ) );
+
+				pentagonNormal = new THREE.Vector3();
+				pentagonCenter = new THREE.Vector3();
+				for ( let i = 0, triangleCenter, triangleNormal; i < triangles.length; i++ )
+				{
+					triangleCenter = new THREE.Vector3();
+					triangleNormal = new THREE.Vector3();
+					triangles[i].getMidpoint( triangleCenter );
+					triangles[i].getNormal( triangleNormal );
+					pentagonCenter.add( triangleCenter );
+					pentagonNormal.add( triangleNormal );
+				}
+				pentagonNormal.divideScalar( triangles.length );
+				pentagonCenter.divideScalar( triangles.length );
+				pentagonCenter.sub( new THREE.Vector3( 0.0, -10.0, 0.0 ) ).sub( modelCenter );
+
+				distance = pentagonCenter.length() * 2.0;
+				modelDirection.lerpVectors( modelDirection, pentagonNormal.setLength( distance ), 0.5 );
+				return ;				
+			}
+
+			function updateModel()
+			{
+				let direction;
+
+				if ( modelAnimMixer )
+					modelAnimMixer.update( clock.getDelta() );
+				modelCenter = getBonePosition( 0 );
+				direction = getBonePosition( indexHipLeft );
+				direction.sub( getBonePosition( indexHipRight ) ).normalize();
+				modelAngle = Math.PI * 0.5 + Math.atan2( direction.x, direction.z );
+				updateModelDirection();
+				return ;
+			}
+
+			function updateGuizmoHelper( edge )
+			{
+				modelGuizmoHelper.position.set( modelCenter.x, modelCenter.y, modelCenter.z );
+				modelGuizmoHelper.rotation.set( 0, modelAngle, 0 );
+				modelGuizmoHelper.scale.set( edge, edge, edge );
+				return ;
+			}
+
+			function updateIcoHelper( edge )
+			{
+				edge = Math.sqrt( Math.pow( edge, 2.0 ) + Math.pow( edge * 0.618034, 2.0 ) );
+				modelIcoHelper.position.set( modelCenter.x, modelCenter.y, modelCenter.z );
+				modelIcoHelper.rotation.set( 0, modelAngle, 0 );
+				modelIcoHelper.scale.set( edge, edge, edge);
+				return ;
+			}
+
+			function updatePentaHelper()
+			{
+				let geometry;
+
+				geometry = new THREE.Geometry();
+				geometry.vertices.push( getBonePosition( indexHead ) );
+				geometry.vertices.push( getBonePosition( indexHandLeft ) );
+				geometry.vertices.push( getBonePosition( indexHandRight ) );
+				geometry.vertices.push( getBonePosition( indexFootLeft ) );
+				geometry.vertices.push( getBonePosition( indexFootRight ) );
+
+				geometry.faces.push( new THREE.Face3( 3, 0, 2 ) );
+				geometry.faces.push( new THREE.Face3( 1, 2, 4 ) );
+				geometry.faces.push( new THREE.Face3( 0, 4, 3 ) );
+				geometry.faces.push( new THREE.Face3( 2, 3, 1 ) );
+				geometry.faces.push( new THREE.Face3( 4, 1, 0 ) );
+
+				modelPentaHelper.geometry = new THREE.WireframeGeometry( geometry );
+				modelPentaHelper.geometry.needsUpdate = true;
+				return ;
+			}
+
+			function updateDirHelper()
+			{
+				modelDirHelper.setLength( modelDirection.length(), 4.0, 4.0 );
+				modelDirHelper.setDirection( modelDirection.clone().normalize() );
+				modelDirHelper.position.set( modelCenter.x, modelCenter.y, modelCenter.z );
+				return ;
 			}
 
 			function updateModelHelpers()
 			{
 				let edge;
-				let	direction, center;
-				let hipLeft, hipRight;
-				let angle;
 
 				updateModelBbox();
-				hipLeft = getBonePosition( 101 );
-				hipRight = getBonePosition( 111 );
-				direction = hipLeft.clone().sub( hipRight ).normalize();
-				angle = Math.PI * 0.5 + Math.atan2( direction.x, direction.z );
-
-				center = getBonePosition( 0 );
-				updateArrowHelpers( center, angle );
-				
-				edge = getIcosahedronEdge( center, angle );
-				modelGuizmoHelper.position.set( center.x, center.y, center.z );
-				modelGuizmoHelper.scale.set( edge, edge, edge );
-				modelGuizmoHelper.rotation.set( 0, angle, 0 );
-
-				edge = Math.sqrt( Math.pow( edge, 2.0 ) + Math.pow( edge * 0.618034, 2.0 ) );
-				modelIcoHelper.scale.set( edge, edge, edge);
-				modelIcoHelper.position.set( center.x, center.y, center.z );
-				modelIcoHelper.rotation.set( 0, angle, 0 );
-				return ;
-			}
-
-			function updateArrowHelpers( center, angle )
-			{
-				let euler;
-				let positionSum;
-				let sumX, sumY, sumZ;
-
-				euler = new THREE.Euler( 0, angle + Math.PI, 0, 'XYZ' );
-				positionSum = new THREE.Vector3( );
-				for ( let i = 0; i < modelSkelHelper.bones.length; i++ )
-					positionSum.add( getBonePosition( i ) );
-				positionSum.divideScalar( modelSkelHelper.bones.length );
-				positionSum.sub( center );
-
-				sumX = positionSum.clone();
-				sumX.projectOnVector( new THREE.Vector3( 1.0, 0.0, 0.0 ).applyEuler( euler ) );
-				modelArrowHelperX.setLength( sumX.length() * 3.0, 0.0, 4.0 );
-				modelArrowHelperX.setDirection( sumX.normalize() );
-				modelArrowHelperX.position.set( center.x, center.y, center.z );
-
-				sumY = positionSum.clone();
-				sumY.projectOnVector( new THREE.Vector3( 0.0, 1.0, 0.0 ) );
-				modelArrowHelperY.setLength( sumY.length() * 3.0, 0.0, 4.0 );
-				modelArrowHelperY.setDirection( sumY.normalize() );
-				modelArrowHelperY.position.set( center.x, center.y, center.z );
-
-				sumZ = positionSum.clone();
-				sumZ.projectOnVector( new THREE.Vector3( 0.0, 0.0, 1.0 ).applyEuler( euler ) );
-				modelArrowHelperZ.setLength( sumZ.length() * 3.0, 0.0, 4.0 );
-				modelArrowHelperZ.setDirection( sumZ.normalize() );
-				modelArrowHelperZ.position.set( center.x, center.y, center.z );
+				edge = getIcosahedronEdge();
+				updateGuizmoHelper( edge );
+				updateIcoHelper( edge );
+				updatePentaHelper();
+				updateDirHelper();
 				return ;
 			}
 
@@ -321,27 +401,7 @@
 				let positions;
 				let vertices = [];
 
-				/*
-				modelMesh.traverse( function ( child )
-				{
-					if ( child.isMesh )
-					{
-						childGeometry = child.geometry.clone();
-						childGeometry.deleteAttribute( 'normal' );
-						childGeometry.deleteAttribute( 'uv' );
-						positions = childGeometry.getAttribute( 'position' );
-						for ( let i = 0, position; i < positions.count; i++ )
-						{
-							position = new THREE.Vector3();
-							position.fromBufferAttribute( positions, i );
-							child.boneTransform( i, position );
-							vertices.push( position );
-						}
-					}
-				} );
-				*/
-
-				geometry = new THREE.IcosahedronGeometry( 16.0, 2 );
+				geometry = new THREE.IcosahedronGeometry( 8.0, 0 );
 				for (let i = 0, position; i < modelSkelHelper.bones.length; i++ )
 				{
 					position = getBonePosition( i );
@@ -362,15 +422,12 @@
 
 			function animate()
 			{
-				let animation;
-				let name;
-				let settings;
+				let position;
 
 				requestAnimationFrame( animate );
-				if ( modelAnimMixer )
-					modelAnimMixer.update( clock.getDelta() );
-				updateModelConvexMesh();
+				updateModel();
 				updateModelHelpers();
+//				updateModelConvexMesh();
 				render();
 				return ;
 			}
